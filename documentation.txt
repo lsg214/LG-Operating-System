@@ -1,8 +1,10 @@
 6.13.2025 
-This file acts as a description for the files that will exist in this project file as a future reference...
+This file acts as a log for the files that will exist in this project file as a future reference...
 boot.asm - a file that constructs a working bootloader in assembly that displays text
 makefile - automates building and running
 reminder that a bootloader is a small program that initializes a computer or embedded system when powered on
 notes about boot.asm 
 a. The bootloader runs in real-mode (a default 16-bit system), direct access to all memory and hardware, limited to 1MB of addressable memory
 no memory protection between programs and used by DOS (Disk Operating System) and early bootloaders
+
+Conclusion: finished constructing a bootloader and current operating system features include: a basic bootloader displaying text/real mode assembly programming (at 16-bits) and QEMU emulation support
