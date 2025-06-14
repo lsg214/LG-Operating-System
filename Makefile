@@ -8,6 +8,7 @@ boot.bin: boot.ASM
 	$(ASM) -f bin boot.ASM -o boot.bin
 
 #Run in emulator
+#make boot.bin/run to run the bootloader message
 run: boot.bin
 	$(EMU) -drive format=raw,file=boot.bin,if=floppy -boot a
 
