@@ -8,3 +8,10 @@ a. The bootloader runs in real-mode (a default 16-bit system), direct access to 
 no memory protection between programs and used by DOS (Disk Operating System) and early bootloaders
 
 Conclusion: finished constructing a bootloader and current operating system features include: a basic bootloader displaying text/real mode assembly programming (at 16-bits) and QEMU emulation support
+
+6.19.2025
+aux-boot.asm - an enhanced version of the previous boot.asm file that was constructed to now have VGA output features
+the makefile is also adjusted accordingly to this new boot file that will now be used for further steps of the project
+a. The BIOS (Basic Input/Output System) tests hardware components and hands off the control to the bootloader
+However some versions of systems tend to have BIOS interruptions, in which in this case we eliminate the chance of such events
+occuring and write directly to the VGA memory

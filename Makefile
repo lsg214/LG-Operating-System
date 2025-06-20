@@ -2,21 +2,27 @@
 #Assembler and emulator
 ASM = nasm
 EMU = qemu-system-i386
+DEBUGGER = gdb
 
 #Build the bootloader
-boot.bin: boot.ASM
-	$(ASM) -f bin boot.ASM -o boot.bin
+aux-boot.bin: aux-boot.asm
+	$(ASM) -f bin aux-boot.ASM -o aux-boot.bin
 
 #Run in emulator
 #make boot.bin/run to run the bootloader message
-run: boot.bin
-	$(EMU) -drive format=raw,file=boot.bin,if=floppy -boot a
+run: aux-boot.bin
+	$(EMU) -drive format=raw,file=aux-boot.bin,if=floppy -boot a
+
+#Debugging now enabled -6.19 update
+debug: aux-boot.bin
+	$(EMU) -drive format=raw,file=aux-boot.bin,if=floppy -boot a -s -S &
+	$(DEBUGGER) -ex "target remote localhost:1234" -ex "set architecture i8086" -ex "break *0x7c00" -ex "continue"
 
 #Clean build files
 clean:
 	rm -f *.bin
 
-.PHONY : run clean
+.PHONY : run debug clean
 # This is a phony target, meaning it doesn't correspond to a file
 # and should always be executed when called.
 # The .PHONY directive tells make that 'run' and 'clean' are not files
