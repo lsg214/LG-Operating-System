@@ -123,8 +123,8 @@ clean:
 	rm -f *.o *.bin *.elf *.img .text_offset .text_size .boot_offset .boot_size
 
 # Run in QEMU (requires QEMU to be installed)
-run: $(OS_IMAGE)
-	qemu-system-i386 -fda $(OS_IMAGE)
+run: myos.img
+	qemu-system-x86_64 -drive file=myos.img,format=raw -m 128M
 
 # Run in QEMU with debugging
 debug: $(OS_IMAGE)
