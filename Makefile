@@ -1,47 +1,159 @@
-# Makefile for building and running our OS
-#Assembler and emulator
-ASM = nasm
-EMU = qemu-system-i386
-DEBUGGER = gdb
+# Makefile for building the kernel
+# This builds a minimal C kernel that can be loaded by a bootloader
 
-#Build the bootloader
-aux-boot.bin: aux-boot.asm
-	$(ASM) -f bin aux-boot.ASM -o aux-boot.bin
+# Detect OS
+UNAME_S := $(shell uname -s)
 
-#Run in emulator
-#make boot.bin/run to run the bootloader message
-run: aux-boot.bin
-	$(EMU) -drive format=raw,file=aux-boot.bin,if=floppy -boot a
+# Compiler and tools
+ifeq ($(UNAME_S),Darwin)
+    # macOS - use i386-elf cross compiler if available, otherwise regular gcc
+    CC = i386-elf-gcc
+    LD = i386-elf-ld
+    OBJCOPY = i386-elf-objcopy
+    # If cross compiler not available, fall back to regular tools
+    ifeq ($(shell which i386-elf-gcc 2>/dev/null),)
+        CC = gcc
+        LD = ld
+        # Use otool and dd instead of objcopy on macOS
+        OBJCOPY = 
+        LDFLAGS = -arch i386 -static -e _kernel_main -segaddr __TEXT 0x100000 -pagezero_size 0x0 -macos_version_min 10.6
+        MACOS_NATIVE = 1
+    else
+        LDFLAGS = -m elf_i386 -T linker.ld
+        MACOS_NATIVE = 0
+    endif
+else
+    # Linux/other Unix
+    CC = gcc
+    LD = ld
+    OBJCOPY = objcopy
+    LDFLAGS = -m elf_i386 -T linker.ld
+    MACOS_NATIVE = 0
+endif
 
-#Debugging now enabled -6.19 update
-debug: aux-boot.bin
-	$(EMU) -drive format=raw,file=aux-boot.bin,if=floppy -boot a -s -S &
-	$(DEBUGGER) -ex "target remote localhost:1234" -ex "set architecture i8086" -ex "break *0x7c00" -ex "continue"
+AS = nasm
 
-#Clean build files
+# Compiler flags for kernel development
+CFLAGS = -m32 -ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector \
+         -Wall -Wextra -Werror -c -O2
+
+# Assembly flags
+ASFLAGS = -f elf32
+BOOTLOADER_ASFLAGS = -f bin
+
+# Source files
+KERNEL_SOURCES = kernel.c
+KERNEL_OBJECTS = kernel.o
+BOOTLOADER_SOURCES = boot.asm
+BOOTLOADER_OBJECTS = boot.o
+
+# Output files
+KERNEL_BIN = kernel.bin
+BOOTLOADER_BIN = bootloader.bin
+OS_IMAGE = myos.img
+
+# Default target
+all: check-tools $(OS_IMAGE)
+
+# Check for required tools
+check-tools:
+	@echo "Checking for required tools..."
+	@which $(CC) > /dev/null || (echo "Error: $(CC) not found" && exit 1)
+	@which $(LD) > /dev/null || (echo "Error: $(LD) not found" && exit 1)
+	@which $(AS) > /dev/null || (echo "Error: $(AS) not found" && exit 1)
+ifeq ($(MACOS_NATIVE),0)
+	@which $(OBJCOPY) > /dev/null || (echo "Error: $(OBJCOPY) not found" && exit 1)
+endif
+	@echo "All tools found!"
+
+# Build the OS image
+$(OS_IMAGE): $(KERNEL_BIN) $(BOOTLOADER_BIN)
+	@echo "Creating OS image..."
+	# Create a 1.44MB floppy disk image
+	dd if=/dev/zero of=$(OS_IMAGE) bs=1024 count=1440 2>/dev/null
+	# Copy bootloader to first sector
+	dd if=$(BOOTLOADER_BIN) of=$(OS_IMAGE) bs=512 count=1 conv=notrunc 2>/dev/null
+	# Copy kernel starting at second sector
+	dd if=$(KERNEL_BIN) of=$(OS_IMAGE) bs=512 seek=1 conv=notrunc 2>/dev/null
+	@echo "OS image created: $(OS_IMAGE)"
+
+# Build the kernel binary
+$(KERNEL_BIN): $(KERNEL_OBJECTS)
+	@echo "Linking kernel..."
+	@echo "Using LD: $(LD)"
+	@echo "LDFLAGS: $(LDFLAGS)"
+	@echo "Objects: $(KERNEL_OBJECTS)"
+	@ls -la $(KERNEL_OBJECTS)
+ifeq ($(UNAME_S),Darwin)
+    ifeq ($(shell which i386-elf-gcc 2>/dev/null),)
+        # macOS without cross-compiler - use native tools
+	$(LD) $(LDFLAGS) -o kernel.elf $(KERNEL_OBJECTS)
+	@echo "Extracting binary from Mach-O executable..."
+	# Extract the TEXT segment from the Mach-O file
+	otool -l kernel.elf | grep -A 5 "segname __TEXT" | grep "fileoff" | awk '{print $$2}' > .text_offset
+	otool -l kernel.elf | grep -A 5 "segname __TEXT" | grep "filesize" | awk '{print $$2}' > .text_size
+	dd if=kernel.elf of=$(KERNEL_BIN) bs=1 skip=$$(cat .text_offset) count=$$(cat .text_size) 2>/dev/null
+	rm -f .text_offset .text_size
+    else
+        # macOS with cross-compiler
+	$(LD) $(LDFLAGS) -o kernel.elf $(KERNEL_OBJECTS)
+	$(OBJCOPY) -O binary kernel.elf $(KERNEL_BIN)
+    endif
+else
+    # Linux
+	$(LD) $(LDFLAGS) -o kernel.elf $(KERNEL_OBJECTS)
+	$(OBJCOPY) -O binary kernel.elf $(KERNEL_BIN)
+endif
+
+# Compile kernel C source
+kernel.o: kernel.c
+	@echo "Compiling kernel..."
+	$(CC) $(CFLAGS) kernel.c -o kernel.o
+
+# Assemble bootloader
+$(BOOTLOADER_BIN): boot.asm
+	@echo "Assembling bootloader..."
+	$(AS) $(BOOTLOADER_ASFLAGS) boot.asm -o $(BOOTLOADER_BIN)
+
+boot.o: boot.asm
+	$(AS) $(ASFLAGS) boot.asm -o boot.o
+
+# Clean build artifacts
 clean:
-	rm -f *.bin
+	rm -f *.o *.bin *.elf *.img .text_offset .text_size .boot_offset .boot_size
 
-.PHONY : run debug clean
-# This is a phony target, meaning it doesn't correspond to a file
-# and should always be executed when called.
-# The .PHONY directive tells make that 'run' and 'clean' are not files
-# but rather commands to be executed.
-# This prevents make from getting confused if a file named 'run' or 'clean' exists.
+# Run in QEMU (requires QEMU to be installed)
+run: $(OS_IMAGE)
+	qemu-system-i386 -fda $(OS_IMAGE)
 
+# Run in QEMU with debugging
+debug: $(OS_IMAGE)
+	qemu-system-i386 -fda $(OS_IMAGE) -s -S
 
-#Additional Details about thr Makefile:
-# The 'clean' target is used to remove any generated files, ensuring a fresh build next time.
-# The 'run' target builds the bootloader and runs it in the emulator.
-# The 'boot.bin' target compiles the bootloader assembly code into a binary file.
-# The 'ASM' variable specifies the assembler to use, and 'EMU' specifies the emulator.
-# The 'boot.ASM' file is the source code for the bootloader.
-# The '-f bin' option tells nasm to output a flat binary file, and '-o boot.bin' specifies the output file name.
-# The 'run' target depends on 'boot.bin', meaning it will only run if 'boot.bin' is successfully built.
-# The 'clean' target removes all generated binary files, allowing for a clean slate for the next build.
-# The Makefile is designed to automate the build and run process for the OS bootloader,
-# making it easier to develop and test the bootloader code without manual intervention.
-# The Makefile uses the 'nasm' assembler to compile the assembly code into a binary format
-# and the 'qemu-system-i386' emulator to run the resulting binary.
-# The 'boot.bin' file is the output of the assembly compilation,
-# and it is specified as the input for the emulator.
+# Show kernel information
+info: $(KERNEL_BIN)
+	@echo "Kernel binary information:"
+	@ls -la $(KERNEL_BIN)
+	@echo "Kernel size: $$(stat -f%z $(KERNEL_BIN)) bytes"
+	@echo "Kernel hex dump (first 256 bytes):"
+	@hexdump -C $(KERNEL_BIN) | head -16
+
+# Disassemble kernel
+disasm: kernel.elf
+	objdump -d kernel.elf
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all      - Build complete OS image"
+	@echo "  clean    - Remove build artifacts"
+	@echo "  run      - Run OS in QEMU"
+	@echo "  debug    - Run OS in QEMU with debugging"
+	@echo "  info     - Show kernel information"
+	@echo "  disasm   - Disassemble kernel"
+	@echo "  help     - Show this help"
+	@echo ""
+	@echo "Note: For best results on macOS, install cross-compilation tools:"
+	@echo "  brew install i386-elf-gcc i386-elf-binutils"
+
+.PHONY: all clean run debug info disasm help
